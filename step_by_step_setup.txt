@@ -1,0 +1,19 @@
+1. Download and Install cloudflared in WSL
+Bash
+curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb
+rm cloudflared.deb
+
+2.To execute to public server
+cloudflared tunnel --url http://localhost:9000
+
+3. Share the URL
+Look for the line in the terminal output that looks like:
+
+Plaintext
++-----------------------------------------------------------------------------------+
+| Your quick Tunnel has been created! Visit it at:                                  |
+| https://random-words-1234.trycloudflare.com                                       |
++-----------------------------------------------------------------------------------+
+
+//use render.com for demo purpose from git repository but cant run directly on machine as coolify//
