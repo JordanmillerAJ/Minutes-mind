@@ -1,0 +1,2 @@
+volumes:
+  - .:/var/www/html
