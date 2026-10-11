@@ -60,13 +60,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
             exit;
         }
 
-        // Handle DB user persistence
         if ($email) {
             $stmt = $db->prepare("INSERT INTO users (email, name, role, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET name=excluded.name");
             $stmt->execute([$email, $name, $role, time()]);
         }
 
-        // Room checks
         $stmt = $db->prepare("SELECT * FROM rooms WHERE room_code = ?");
         $stmt->execute([$roomCode]);
         $room = $stmt->fetch();
@@ -76,14 +74,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
                 $stmt = $db->prepare("INSERT INTO rooms (room_code, host_name, host_email, is_active, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)");
                 $stmt->execute([$roomCode, $name, $email, time(), time()]);
             } else {
-                // Reactivate room if host rejoins
                 $stmt = $db->prepare("UPDATE rooms SET is_active = 1, updated_at = ? WHERE room_code = ?");
                 $stmt->execute([time(), $roomCode]);
             }
             echo json_encode(['success' => true, 'roomCode' => $roomCode]);
             exit;
         } else {
-            // Member check: Must exist and be active
             if (!$room || (int)$room['is_active'] !== 1) {
                 echo json_encode(['error' => 'Room does not exist or has been terminated by the host.']);
                 exit;
@@ -93,15 +89,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
         }
     }
 
-    // 2. Host Terminate Room (Purges Chat & Signal History)
+    // 2. Host Terminate Room
     if ($_GET['action'] === 'terminate_room') {
         $roomCode = strtoupper(preg_replace('/[^A-Za-z0-9_\-]/', '', $input['roomCode'] ?? ''));
         if ($roomCode) {
-            // Set inactive
             $stmt = $db->prepare("UPDATE rooms SET is_active = 0 WHERE room_code = ?");
             $stmt->execute([$roomCode]);
-
-            // Clear chat and signaling history in DB for this room
             $stmt = $db->prepare("DELETE FROM signals WHERE room_code = ?");
             $stmt->execute([$roomCode]);
         }
@@ -112,13 +105,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
     // 3. Post Signal/Message
     if ($_GET['action'] === 'send_signal') {
         $roomCode = strtoupper(preg_replace('/[^A-Za-z0-9_\-]/', '', $input['roomCode'] ?? ''));
-
         if (!$roomCode) {
             echo json_encode(['error' => 'Missing roomCode']);
             exit;
         }
 
-        // Verify active room
         $stmt = $db->prepare("SELECT is_active FROM rooms WHERE room_code = ?");
         $stmt->execute([$roomCode]);
         $room = $stmt->fetch();
@@ -140,7 +131,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
         $roomCode = strtoupper(preg_replace('/[^A-Za-z0-9_\-]/', '', $input['roomCode'] ?? ''));
         $since = (int)($input['since'] ?? 0);
 
-        // Check active status
         $stmt = $db->prepare("SELECT is_active FROM rooms WHERE room_code = ?");
         $stmt->execute([$roomCode]);
         $room = $stmt->fetch();
@@ -150,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
             exit;
         }
 
-        $stmt = $db->prepare("SELECT payload FROM signals WHERE room_code = ? AND ts > ? ORDER BY ts ASC");
+        $stmt = $db->prepare("SELECT payload FROM signals WHERE room_code = ? AND ts > ? ORDER BY id ASC");
         $stmt->execute([$roomCode, $since]);
         $rows = $stmt->fetchAll();
 
@@ -244,11 +234,11 @@ function file_get_json_input() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MinuteMind Pro — Network Workspace</title>
+    <title>MinuteMind Pro — Modern Workspace</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -257,164 +247,188 @@ function file_get_json_input() {
 
     <style>
         :root {
-            --bg-main: #f8fafc;
-            --card-bg: #ffffff;
-            --border-color: #e2e8f0;
-            --text-primary: #0f172a;
-            --text-secondary: #475569;
-            --primary: #0284c7;
-            --primary-hover: #0369a1;
+            --bg-main: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-glow: rgba(14, 165, 233, 0.15);
         }
 
         body {
-            font-family: 'Inter', -apple-system, sans-serif;
-            background-color: var(--bg-main);
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: radial-gradient(circle at top, #1e293b 0%, #0f172a 100%);
             color: var(--text-primary);
         }
 
-        .light-card {
+        .glass-card {
             background: var(--card-bg);
+            backdrop-filter: blur(16px);
             border: 1px solid var(--border-color);
-            border-radius: 12px;
-            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .glass-card:hover {
+            border-color: rgba(14, 165, 233, 0.3);
+            box-shadow: 0 12px 35px -8px var(--accent-glow);
         }
 
         .btn {
-            display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
-            font-weight: 600; font-size: .8125rem; border-radius: 6px; padding: .5rem 1rem;
-            transition: all .15s ease; cursor: pointer;
+            display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+            font-weight: 600; font-size: 0.8125rem; border-radius: 10px; padding: 0.6rem 1.2rem;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer;
         }
         .btn-primary {
-            background-color: var(--primary); color: #ffffff;
+            background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 14px 0 rgba(2, 132, 199, 0.39);
         }
-        .btn-primary:hover { background-color: var(--primary-hover); }
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px 0 rgba(2, 132, 199, 0.55);
+        }
 
         .btn-ghost {
-            background-color: #f1f5f9; color: var(--text-secondary); border: 1px solid #cbd5e1;
+            background: rgba(255, 255, 255, 0.05); color: #e2e8f0; border: 1px solid var(--border-color);
         }
-        .btn-ghost:hover { background-color: #e2e8f0; color: var(--text-primary); }
+        .btn-ghost:hover { background: rgba(255, 255, 255, 0.1); color: #ffffff; }
 
         .btn-danger {
-            background-color: #ef4444; color: #ffffff;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: #ffffff;
+            box-shadow: 0 4px 14px 0 rgba(239, 68, 68, 0.35);
         }
-        .btn-danger:hover { background-color: #dc2626; }
+        .btn-danger:hover { transform: translateY(-1px); box-shadow: 0 6px 20px 0 rgba(239, 68, 68, 0.5); }
 
         .field {
-            width: 100%;
-            background-color: #f8fafc;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px; padding: .5rem .75rem; color: var(--text-primary);
-            font-size: .875rem; transition: border-color .15s ease;
+            width: 100%; background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 10px; padding: 0.6rem 0.9rem; color: #f8fafc;
+            font-size: 0.875rem; transition: all 0.2s ease;
         }
-        .field:focus { outline: none; border-color: var(--primary); background-color: #ffffff; }
+        .field:focus { outline: none; border-color: #38bdf8; background: rgba(15, 23, 42, 0.9); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15); }
 
         .pill {
-            display: inline-flex; align-items: center; gap: .4rem;
-            padding: .2rem .6rem; border-radius: 9999px;
-            font-size: .7rem; font-weight: 600;
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.25rem 0.75rem; border-radius: 9999px;
+            font-size: 0.725rem; font-weight: 700;
         }
-        .pill-live { background-color: #dcfce7; color: #166534; }
-        .pill-off { background-color: #f1f5f9; color: #64748b; }
-        .pill .dot { width: .4rem; height: .4rem; border-radius: 9999px; background-color: currentColor; }
+        .pill-live { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+        .pill-off { background: rgba(148, 163, 184, 0.1); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.2); }
+        .pill .dot { width: 0.45rem; height: 0.45rem; border-radius: 9999px; background-color: currentColor; animation: pulse 2s infinite; }
 
-        #toastWrap { position: fixed; top: 1rem; right: 1rem; z-index: 200; display: flex; flex-direction: column; gap: .5rem; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        #toastWrap { position: fixed; top: 1.25rem; right: 1.25rem; z-index: 200; display: flex; flex-direction: column; gap: 0.6rem; }
         .toast {
-            background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid var(--primary);
-            border-radius: 6px; padding: .75rem 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
-            opacity: 0; transform: translateX(20px); transition: all .2s ease;
+            background: #1e293b; border: 1px solid var(--border-color); border-left: 4px solid #38bdf8;
+            border-radius: 10px; padding: 0.85rem 1.1rem; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
+            opacity: 0; transform: translateX(30px); transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .toast.show { opacity: 1; transform: translateX(0); }
 
-        .chat-bubble { padding: .5rem .75rem; border-radius: 8px; font-size: .8125rem; max-width: 85%; word-break: break-word; }
-        .chat-mine { background-color: #e0f2fe; color: #0369a1; align-self: flex-end; }
-        .chat-other { background-color: #f1f5f9; color: #334155; align-self: flex-start; }
+        .chat-bubble { padding: 0.65rem 0.9rem; border-radius: 12px; font-size: 0.8125rem; max-width: 85%; word-break: break-word; line-height: 1.4; }
+        .chat-mine { background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .chat-other { background: rgba(51, 65, 85, 0.7); color: #f1f5f9; align-self: flex-start; border-bottom-left-radius: 2px; border: 1px solid var(--border-color); }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
     </style>
 </head>
-<body class="min-h-screen flex flex-col">
+<body class="min-h-screen flex flex-col selection:bg-sky-500 selection:text-white">
 
     <div id="toastWrap"></div>
 
     <!-- ================= HEADER ================= -->
-    <header id="appHeader" class="hidden border-b border-slate-200 bg-white sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <i class="fa-solid fa-users-viewfinder text-sky-600 text-xl"></i>
-                <div class="flex items-center gap-2">
-                    <h1 class="text-base font-bold text-slate-800">MinuteMind Pro</h1>
-                    <span id="roleBadge" class="px-2 py-0.5 text-[11px] font-semibold rounded bg-sky-100 text-sky-700">HOST</span>
-                    <span id="roomBadge" class="px-2 py-0.5 text-[11px] font-semibold rounded bg-slate-100 text-slate-700">ROOM: ---</span>
+    <header id="appHeader" class="hidden border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-3.5 flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-cyan-400 flex items-center justify-center text-white shadow-lg shadow-sky-500/20">
+                    <i class="fa-solid fa-users-viewfinder text-lg"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-base font-extrabold tracking-tight text-white">MinuteMind <span class="text-sky-400">Pro</span></h1>
+                        <span id="roleBadge" class="px-2 py-0.5 text-[10px] font-extrabold tracking-wider rounded-md bg-sky-500/10 text-sky-400 border border-sky-500/20 uppercase">HOST</span>
+                    </div>
+                    <span id="roomBadge" class="text-xs font-semibold text-slate-400">ROOM: ---</span>
                 </div>
             </div>
 
-            <div class="flex items-center space-x-3">
+            <div class="flex items-center space-x-4">
                 <span id="ollamaPill" class="pill pill-off"><span class="dot"></span><span id="ollamaText">Ollama Off</span></span>
-                <div class="flex items-center gap-2 bg-slate-50 px-2 py-1 rounded border border-slate-200">
-                    <div id="userAvatar" class="w-6 h-6 rounded-full bg-sky-600 flex items-center justify-center font-bold text-xs text-white">U</div>
-                    <span id="userNameDisplay" class="text-xs font-medium text-slate-700">User</span>
+                <div class="flex items-center gap-2.5 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700/60">
+                    <div id="userAvatar" class="w-6 h-6 rounded-lg bg-sky-500 flex items-center justify-center font-bold text-xs text-white shadow-sm">U</div>
+                    <span id="userNameDisplay" class="text-xs font-semibold text-slate-200">User</span>
                 </div>
-                <button id="terminateBtn" title="Terminate Room (Host)" class="btn btn-danger py-1 text-xs hidden"><i class="fa-solid fa-power-off mr-1"></i> Terminate</button>
-                <button id="logoutBtn" title="Leave Room" class="btn btn-ghost py-1 text-xs"><i class="fa-solid fa-right-from-bracket"></i> Leave</button>
+                <button id="terminateBtn" title="Terminate Room (Host)" class="btn btn-danger py-1.5 text-xs hidden"><i class="fa-solid fa-power-off"></i> Terminate</button>
+                <button id="logoutBtn" title="Leave Room" class="btn btn-ghost py-1.5 text-xs"><i class="fa-solid fa-right-from-bracket"></i> Leave</button>
             </div>
         </div>
     </header>
 
     <!-- ================= AUTH & ROOM ENTRY SCREEN ================= -->
-    <div id="authScreen" class="flex-1 flex items-center justify-center px-4 py-12">
-        <div class="w-full max-w-md light-card p-8">
-            <div class="text-center mb-6">
-                <div class="w-12 h-12 rounded-full bg-sky-50 text-sky-600 flex items-center justify-center mx-auto mb-3">
-                    <i class="fa-solid fa-network-wired text-xl"></i>
+    <div id="authScreen" class="flex-1 flex items-center justify-center px-4 py-16">
+        <div class="w-full max-w-md glass-card p-8 relative overflow-hidden">
+            <div class="absolute -top-24 -left-24 w-48 h-48 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            
+            <div class="text-center mb-8">
+                <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-sky-500 to-cyan-400 flex items-center justify-center mx-auto mb-4 text-white shadow-xl shadow-sky-500/20">
+                    <i class="fa-solid fa-network-wired text-2xl"></i>
                 </div>
-                <h2 class="text-xl font-bold text-slate-800">MinuteMind Workspace</h2>
-                <p class="text-xs text-slate-500 mt-1">Lightweight LAN Multi-User Collaboration</p>
+                <h2 class="text-2xl font-extrabold tracking-tight text-white">MinuteMind Workspace</h2>
+                <p class="text-xs font-medium text-slate-400 mt-1.5">Collaborative WebRTC & AI Minutes Engine</p>
             </div>
 
-            <div class="flex rounded-lg bg-slate-100 p-1 mb-6 border border-slate-200">
-                <button id="tabHostBtn" type="button" class="flex-1 py-1.5 text-xs font-semibold rounded-md bg-white text-slate-800 shadow-sm">Host Session</button>
-                <button id="tabMemberBtn" type="button" class="flex-1 py-1.5 text-xs font-semibold rounded-md text-slate-600 hover:text-slate-800">Join Member</button>
+            <div class="flex rounded-xl bg-slate-900/80 p-1 mb-6 border border-slate-800">
+                <button id="tabHostBtn" type="button" class="flex-1 py-2 text-xs font-bold rounded-lg bg-sky-600 text-white shadow-md transition-all">Host Session</button>
+                <button id="tabMemberBtn" type="button" class="flex-1 py-2 text-xs font-bold rounded-lg text-slate-400 hover:text-white transition-all">Join Member</button>
             </div>
 
             <!-- HOST FORM -->
             <form id="hostAuthForm" class="space-y-4">
                 <div>
-                    <label class="block text-xs font-medium text-slate-700 mb-1">Host Name</label>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1.5">Host Name</label>
                     <input type="text" id="hostName" required class="field" placeholder="e.g. Alex Host">
                 </div>
                 <div>
-                    <label class="block text-xs font-medium text-slate-700 mb-1">Email Address</label>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1.5">Email Address</label>
                     <input type="email" id="hostEmail" required class="field" placeholder="alex@company.com">
                 </div>
                 <div>
-                    <label class="block text-xs font-medium text-slate-700 mb-1">Room Code</label>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1.5">Room Code</label>
                     <div class="flex gap-2">
-                        <input type="text" id="hostRoomCode" required class="field uppercase" placeholder="e.g. ROOM1234">
-                        <button type="button" id="genRoomBtn" class="btn btn-ghost shrink-0"><i class="fa-solid fa-dice"></i></button>
+                        <input type="text" id="hostRoomCode" required class="field uppercase font-mono tracking-wider" placeholder="ROOM1234">
+                        <button type="button" id="genRoomBtn" class="btn btn-ghost shrink-0" title="Generate Code"><i class="fa-solid fa-dice text-base"></i></button>
                     </div>
                 </div>
-                <button type="submit" class="w-full btn btn-primary py-2.5 text-xs">Create & Host Room</button>
+                <button type="submit" class="w-full btn btn-primary py-3 text-xs tracking-wide uppercase font-extrabold mt-2">Create & Host Room</button>
             </form>
 
             <!-- MEMBER FORM -->
             <form id="memberAuthForm" class="space-y-4 hidden">
                 <div>
-                    <label class="block text-xs font-medium text-slate-700 mb-1">Your Name</label>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1.5">Your Name</label>
                     <input type="text" id="memberName" required class="field" placeholder="e.g. Sarah Member">
                 </div>
                 <div>
-                    <label class="block text-xs font-medium text-slate-700 mb-1">Email Address (Optional)</label>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1.5">Email Address (Optional)</label>
                     <input type="email" id="memberEmail" class="field" placeholder="sarah@company.com">
                 </div>
                 <div>
-                    <label class="block text-xs font-medium text-slate-700 mb-1">Target Room Code</label>
-                    <input type="text" id="memberRoomCode" required class="field uppercase" placeholder="Enter Host Code">
+                    <label class="block text-xs font-semibold text-slate-300 mb-1.5">Target Room Code</label>
+                    <input type="text" id="memberRoomCode" required class="field uppercase font-mono tracking-wider" placeholder="Enter Host Code">
                 </div>
-                <button type="submit" class="w-full btn btn-primary py-2.5 text-xs">Join Room Session</button>
+                <button type="submit" class="w-full btn btn-primary py-3 text-xs tracking-wide uppercase font-extrabold mt-2">Join Room Session</button>
             </form>
         </div>
     </div>
 
     <!-- ================= MAIN WORKSPACE ================= -->
-    <main id="appWorkspace" class="hidden flex-1 max-w-7xl w-full mx-auto px-4 py-6">
+    <main id="appWorkspace" class="hidden flex-1 max-w-7xl w-full mx-auto px-6 py-6">
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
             <!-- LEFT/MAIN COLUMN -->
@@ -422,68 +436,70 @@ function file_get_json_input() {
 
                 <!-- HOST BOARD -->
                 <div id="hostBoard" class="hidden space-y-6">
-                    <div class="light-card p-4">
-                        <div class="flex justify-between items-center mb-3">
-                            <span class="text-xs font-bold text-slate-700 uppercase"><i class="fa-solid fa-video text-sky-600 mr-1"></i> Host WebRTC Stream</span>
-                            <span class="text-[11px] text-slate-400">P2P Broadcast</span>
+                    <div class="glass-card p-5">
+                        <div class="flex justify-between items-center mb-3.5">
+                            <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-video text-sky-400 mr-2"></i> Host WebRTC Broadcast</span>
+                            <span class="text-[11px] font-semibold text-slate-500">P2P Stream</span>
                         </div>
-                        <div class="relative bg-slate-900 aspect-video rounded-lg flex items-center justify-center overflow-hidden">
+                        <div class="relative bg-slate-950 aspect-video rounded-xl flex items-center justify-center overflow-hidden border border-slate-800 shadow-inner">
                             <video id="hostVideoPlayer" class="w-full h-full object-cover hidden" autoplay playsinline muted></video>
-                            <div id="videoPlaceholder" class="text-center text-slate-400">
-                                <i class="fa-solid fa-camera text-3xl mb-2"></i>
-                                <p class="text-xs">No active video stream</p>
+                            <div id="videoPlaceholder" class="text-center text-slate-500 p-6">
+                                <div class="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto mb-3">
+                                    <i class="fa-solid fa-video-slash text-xl text-slate-600"></i>
+                                </div>
+                                <p class="text-xs font-semibold">No active video stream</p>
                             </div>
                         </div>
-                        <div class="flex gap-2 mt-3">
-                            <button id="startCamBtn" class="btn btn-ghost text-xs"><i class="fa-solid fa-webcam"></i> Camera</button>
+                        <div class="flex gap-2.5 mt-4">
+                            <button id="startCamBtn" class="btn btn-ghost text-xs"><i class="fa-solid fa-webcam text-sky-400"></i> Camera</button>
                             <label class="btn btn-ghost text-xs cursor-pointer">
-                                <i class="fa-solid fa-folder-open"></i> Video File
+                                <i class="fa-solid fa-folder-open text-sky-400"></i> Video File
                                 <input type="file" id="videoFileInput" accept="video/*" class="hidden">
                             </label>
                             <button id="stopVideoBtn" class="btn btn-danger text-xs hidden"><i class="fa-solid fa-power-off"></i> Stop Stream</button>
                         </div>
                     </div>
 
-                    <div class="light-card p-4 space-y-3">
+                    <div class="glass-card p-5 space-y-3.5">
                         <div class="flex justify-between items-center">
-                            <span class="text-xs font-bold text-slate-700 uppercase"><i class="fa-solid fa-wand-magic-sparkles text-sky-600 mr-1"></i> Meeting Notes Input</span>
-                            <button id="loadSampleBtn" class="text-[11px] text-sky-600 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">Sample Text</button>
+                            <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-wand-magic-sparkles text-sky-400 mr-2"></i> Meeting Transcript Input</span>
+                            <button id="loadSampleBtn" class="text-[11px] font-bold text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20 hover:bg-sky-500/20 transition-all">Sample Text</button>
                         </div>
-                        <textarea id="transcriptInput" rows="4" class="field resize-none" placeholder="Paste transcript or notes here..."></textarea>
-                        <button id="generateBtn" class="w-full btn btn-primary text-xs py-2"><i class="fa-solid fa-bolt"></i> Generate AI Minutes</button>
+                        <textarea id="transcriptInput" rows="4" class="field resize-none leading-relaxed" placeholder="Paste transcript or notes here..."></textarea>
+                        <button id="generateBtn" class="w-full btn btn-primary text-xs py-2.5"><i class="fa-solid fa-bolt"></i> Generate AI Minutes</button>
                     </div>
 
-                    <div class="light-card p-4 space-y-3">
+                    <div class="glass-card p-5 space-y-3.5">
                         <div class="flex justify-between items-center">
-                            <span class="text-xs font-bold text-slate-700 uppercase"><i class="fa-solid fa-file-lines text-sky-600 mr-1"></i> Formatted Minutes</span>
-                            <button id="broadcastBtn" class="btn btn-primary text-[11px]"><i class="fa-solid fa-share-nodes"></i> Share with Members</button>
+                            <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-file-lines text-sky-400 mr-2"></i> Formatted Minutes</span>
+                            <button id="broadcastBtn" class="btn btn-primary text-[11px] py-1.5"><i class="fa-solid fa-share-nodes"></i> Share with Members</button>
                         </div>
-                        <div id="formattedOutput" class="bg-slate-50 p-4 rounded-lg text-xs text-slate-700 border border-slate-200 min-h-[120px] prose max-w-none">
-                            <em class="text-slate-400">Generated minutes will render here...</em>
+                        <div id="formattedOutput" class="bg-slate-950/60 p-5 rounded-xl text-xs text-slate-300 border border-slate-800/80 min-h-[140px] prose prose-invert max-w-none leading-relaxed">
+                            <em class="text-slate-500">Generated minutes will render here...</em>
                         </div>
                     </div>
                 </div>
 
                 <!-- MEMBER BOARD -->
                 <div id="memberBoard" class="hidden space-y-6">
-                    <div class="light-card p-4">
-                        <div class="flex justify-between items-center mb-3">
-                            <span class="text-xs font-bold text-slate-700 uppercase"><i class="fa-solid fa-display text-sky-600 mr-1"></i> Host Stream</span>
+                    <div class="glass-card p-5">
+                        <div class="flex justify-between items-center mb-3.5">
+                            <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-display text-sky-400 mr-2"></i> Host Broadcast Stream</span>
                             <span id="hostConnPill" class="pill pill-off"><span class="dot"></span><span id="hostConnText">Offline</span></span>
                         </div>
-                        <div class="relative bg-slate-900 aspect-video rounded-lg flex items-center justify-center overflow-hidden">
+                        <div class="relative bg-slate-950 aspect-video rounded-xl flex items-center justify-center overflow-hidden border border-slate-800 shadow-inner">
                             <video id="memberVideoPlayer" class="w-full h-full object-cover hidden" autoplay playsinline controls muted></video>
-                            <div id="memberVideoPlaceholder" class="text-center p-4 text-slate-400">
-                                <i class="fa-solid fa-tower-broadcast text-3xl mb-2"></i>
-                                <p class="text-xs">Awaiting host video broadcast...</p>
+                            <div id="memberVideoPlaceholder" class="text-center p-6 text-slate-500">
+                                <i class="fa-solid fa-tower-broadcast text-3xl mb-2 text-slate-600"></i>
+                                <p class="text-xs font-semibold">Awaiting host video broadcast...</p>
                             </div>
                         </div>
                     </div>
 
-                    <div class="light-card p-4">
-                        <h3 class="text-xs font-bold text-slate-700 uppercase mb-3"><i class="fa-solid fa-newspaper text-sky-600 mr-1"></i> Published Meeting Minutes</h3>
-                        <div id="memberFormattedOutput" class="bg-slate-50 p-4 rounded-lg text-xs text-slate-700 border border-slate-200 min-h-[150px] prose max-w-none">
-                            <em class="text-slate-400">Awaiting host published notes...</em>
+                    <div class="glass-card p-5">
+                        <h3 class="text-xs font-extrabold tracking-wider text-slate-300 uppercase mb-3.5"><i class="fa-solid fa-newspaper text-sky-400 mr-2"></i> Published Meeting Minutes</h3>
+                        <div id="memberFormattedOutput" class="bg-slate-950/60 p-5 rounded-xl text-xs text-slate-300 border border-slate-800/80 min-h-[160px] prose prose-invert max-w-none leading-relaxed">
+                            <em class="text-slate-500">Awaiting host published notes...</em>
                         </div>
                     </div>
                 </div>
@@ -492,30 +508,30 @@ function file_get_json_input() {
 
             <!-- RIGHT COLUMN -->
             <div class="lg:col-span-4 space-y-6">
-                <div class="light-card p-4">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-xs font-bold text-slate-700 uppercase"><i class="fa-solid fa-users text-sky-600 mr-1"></i> Active Members</span>
-                        <span id="peerCountBadge" class="text-[11px] font-bold px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-100">1</span>
+                <div class="glass-card p-5">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-users text-sky-400 mr-2"></i> Active Members</span>
+                        <span id="peerCountBadge" class="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20">1</span>
                     </div>
-                    <ul id="peerList" class="space-y-1 text-xs max-h-32 overflow-y-auto"></ul>
+                    <ul id="peerList" class="space-y-1.5 text-xs max-h-36 overflow-y-auto pr-1"></ul>
                 </div>
 
                 <!-- Chat System -->
-                <div class="light-card p-4 flex flex-col h-[480px]">
-                    <div class="flex rounded-lg bg-slate-100 p-1 mb-3 border border-slate-200 shrink-0">
-                        <button id="tabPublicChat" class="flex-1 py-1 text-[11px] font-semibold rounded-md bg-white text-slate-800 shadow-sm">Public Chat</button>
-                        <button id="tabPrivateChat" class="flex-1 py-1 text-[11px] font-semibold rounded-md text-slate-600 hover:text-slate-800">Private Direct</button>
+                <div class="glass-card p-5 flex flex-col h-[500px]">
+                    <div class="flex rounded-xl bg-slate-950/80 p-1 mb-3.5 border border-slate-800 shrink-0">
+                        <button id="tabPublicChat" class="flex-1 py-1.5 text-[11px] font-bold rounded-lg bg-sky-600 text-white shadow-sm transition-all">Public Chat</button>
+                        <button id="tabPrivateChat" class="flex-1 py-1.5 text-[11px] font-bold rounded-lg text-slate-400 hover:text-white transition-all">Private Direct</button>
                     </div>
 
-                    <div id="privateTargetWrap" class="hidden mb-2 shrink-0">
-                        <select id="privateTargetSelect" class="field text-xs py-1"></select>
+                    <div id="privateTargetWrap" class="hidden mb-3 shrink-0">
+                        <select id="privateTargetSelect" class="field text-xs py-1.5"></select>
                     </div>
 
-                    <div id="chatBox" class="flex-1 bg-slate-50 rounded-lg border border-slate-200 p-3 overflow-y-auto flex flex-col gap-2 mb-3"></div>
+                    <div id="chatBox" class="flex-1 bg-slate-950/60 rounded-xl border border-slate-800/80 p-3.5 overflow-y-auto flex flex-col gap-2.5 mb-3.5"></div>
 
                     <form id="chatForm" class="flex gap-2 shrink-0">
                         <input type="text" id="chatInput" class="field text-xs" placeholder="Type message..." required>
-                        <button type="submit" class="btn btn-primary px-3"><i class="fa-solid fa-paper-plane"></i></button>
+                        <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-paper-plane"></i></button>
                     </form>
                 </div>
             </div>
@@ -613,19 +629,19 @@ function file_get_json_input() {
         const wrap = $('toastWrap');
         const el = document.createElement('div');
         el.className = 'toast';
-        el.innerHTML = `<div><p class="font-bold text-xs text-slate-800">${title}</p><p class="text-[11px] text-slate-600">${msg || ''}</p></div>`;
+        el.innerHTML = `<div><p class="font-extrabold text-xs text-white">${title}</p><p class="text-[11px] font-medium text-slate-400 mt-0.5">${msg || ''}</p></div>`;
         wrap.appendChild(el);
         requestAnimationFrame(() => el.classList.add('show'));
         setTimeout(() => { el.remove(); }, 3500);
     }
 
     $('tabHostBtn').addEventListener('click', () => {
-        $('tabHostBtn').className = 'flex-1 py-1.5 text-xs font-semibold rounded-md bg-white text-slate-800 shadow-sm';$('tabMemberBtn').className = 'flex-1 py-1.5 text-xs font-semibold rounded-md text-slate-600 hover:text-slate-800';
+        $('tabHostBtn').className = 'flex-1 py-2 text-xs font-bold rounded-lg bg-sky-600 text-white shadow-md transition-all';$('tabMemberBtn').className = 'flex-1 py-2 text-xs font-bold rounded-lg text-slate-400 hover:text-white transition-all';
         $('hostAuthForm').classList.remove('hidden');$('memberAuthForm').classList.add('hidden');
     });
 
     $('tabMemberBtn').addEventListener('click', () => {
-        $('tabMemberBtn').className = 'flex-1 py-1.5 text-xs font-semibold rounded-md bg-white text-slate-800 shadow-sm';$('tabHostBtn').className = 'flex-1 py-1.5 text-xs font-semibold rounded-md text-slate-600 hover:text-slate-800';
+        $('tabMemberBtn').className = 'flex-1 py-2 text-xs font-bold rounded-lg bg-sky-600 text-white shadow-md transition-all';$('tabHostBtn').className = 'flex-1 py-2 text-xs font-bold rounded-lg text-slate-400 hover:text-white transition-all';
         $('memberAuthForm').classList.remove('hidden');$('hostAuthForm').classList.add('hidden');
     });
 
@@ -662,9 +678,11 @@ function file_get_json_input() {
                 $('hostBoard').classList.add('hidden');$('terminateBtn').classList.add('hidden');
             }
 
-            sendToNetwork({ type: 'presence' });
-            setInterval(pollNetworkSignals, 1500);
-            setInterval(sendPresence, 4000);
+            await sendToNetwork({ type: 'presence' });
+            setTimeout(() => sendToNetwork({ type: 'presence' }), 500);
+
+            setInterval(pollNetworkSignals, 1000);
+            setInterval(sendPresence, 3000);
 
             checkOllamaStatus();
             setInterval(checkOllamaStatus, 10000);
@@ -737,7 +755,7 @@ function file_get_json_input() {
         select.innerHTML = '';
 
         const selfItem = document.createElement('li');
-        selfItem.className = 'text-sky-600 font-semibold';
+        selfItem.className = 'text-sky-400 font-bold flex items-center justify-between py-1 px-2 rounded-lg bg-sky-500/10 border border-sky-500/20';
         selfItem.textContent = `${MY.name} (${MY.role.toUpperCase()}) - You`;
         list.appendChild(selfItem);
 
@@ -745,7 +763,7 @@ function file_get_json_input() {
         peers.forEach((p, id) => {
             count++;
             const item = document.createElement('li');
-            item.className = 'text-slate-600';
+            item.className = 'text-slate-300 font-medium py-1 px-2 rounded-lg bg-slate-900/60 border border-slate-800';
             item.textContent = `${p.name} (${p.role.toUpperCase()})`;
             list.appendChild(item);
 
@@ -760,28 +778,28 @@ function file_get_json_input() {
 
     $('tabPublicChat').addEventListener('click', () => {
         activeChatTab = 'public';
-        $('tabPublicChat').className = 'flex-1 py-1 text-[11px] font-semibold rounded-md bg-white text-slate-800 shadow-sm';
-        $('tabPrivateChat').className = 'flex-1 py-1 text-[11px] font-semibold rounded-md text-slate-600 hover:text-slate-800';$('privateTargetWrap').classList.add('hidden');
+        $('tabPublicChat').className = 'flex-1 py-1.5 text-[11px] font-bold rounded-lg bg-sky-600 text-white shadow-sm transition-all';
+        $('tabPrivateChat').className = 'flex-1 py-1.5 text-[11px] font-bold rounded-lg text-slate-400 hover:text-white transition-all';$('privateTargetWrap').classList.add('hidden');
     });
 
     $('tabPrivateChat').addEventListener('click', () => {
         activeChatTab = 'private';
-        $('tabPrivateChat').className = 'flex-1 py-1 text-[11px] font-semibold rounded-md bg-white text-slate-800 shadow-sm';
-        $('tabPublicChat').className = 'flex-1 py-1 text-[11px] font-semibold rounded-md text-slate-600 hover:text-slate-800';$('privateTargetWrap').classList.remove('hidden');
+        $('tabPrivateChat').className = 'flex-1 py-1.5 text-[11px] font-bold rounded-lg bg-sky-600 text-white shadow-sm transition-all';
+        $('tabPublicChat').className = 'flex-1 py-1.5 text-[11px] font-bold rounded-lg text-slate-400 hover:text-white transition-all';$('privateTargetWrap').classList.remove('hidden');
     });
 
-    $('chatForm').addEventListener('submit', (e) => {
+    $('chatForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = $('chatInput').value.trim();
         if (!text) return;
 
         if (activeChatTab === 'public') {
-            sendToNetwork({ type: 'public-chat', text: text });
+            await sendToNetwork({ type: 'public-chat', text: text });
             appendChatMessage({ senderName: MY.name, text: text, isMine: true, isPrivate: false });
         } else {
             const targetId = $('privateTargetSelect').value;
             if (!targetId) { toast('Error', 'Select a room member.'); return; }
-            sendToNetwork({ type: 'private-chat', targetTabId: targetId, text: text });
+            await sendToNetwork({ type: 'private-chat', targetTabId: targetId, text: text });
             appendChatMessage({ senderName: `To ${peers.get(targetId)?.name || 'User'}`, text: text, isMine: true, isPrivate: true });
         }
         $('chatInput').value = '';
@@ -793,7 +811,7 @@ function file_get_json_input() {
         el.className = `chat-bubble ${msg.isMine ? 'chat-mine' : 'chat-other'}`;
 
         const sender = document.createElement('div');
-        sender.className = 'font-bold text-[10px] opacity-75 mb-0.5';
+        sender.className = 'font-bold text-[10px] opacity-80 mb-0.5';
         sender.textContent = `${msg.senderName} ${msg.isPrivate ? '(Private Direct)' : ''}`;
 
         const content = document.createElement('div');
@@ -930,6 +948,10 @@ function file_get_json_input() {
             case 'presence':
                 peers.set(m.from, { name: m.senderName, role: m.senderRole, lastSeen: Date.now() });
                 renderPeerList();
+
+                if (!peers.has(m.from)) {
+                    sendToNetwork({ type: 'presence' });
+                }
 
                 if (MY.role === 'host' && localStream && m.senderRole === 'member' && !rtcConnections.has(m.from)) {
                     initiatePeerConnection(m.from);
