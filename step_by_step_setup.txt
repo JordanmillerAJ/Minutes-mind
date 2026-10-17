@@ -1,3 +1,24 @@
+      STEP 1.AFTER START SYSTEM
+Open PowerShell on your Windows system.
+
+Run these commands to set the binding flags and start the server:
+
+DOS
+$env:OLLAMA_HOST="0.0.0.0:11434"
+$env:OLLAMA_ORIGINS="*"
+ollama serve
+
+Open your WSL Ubuntu terminal.
+
+Run this command to check your Windows host gateway IP:
+
+Bash
+ip route show | grep default | awk '{print $3}'
+(For example, yours was 172.30.160.1). Ensure this matches the OLLAMA_HOST_URL value you saved inside your Coolify project environment variables ([http://172.30.160.1:11434](http://172.30.160.1:11434))
+
+
+
+      2.FOR FORWARD LOCALHOST T O CLOUDFLARE!!!
 1. Download and Install cloudflared in WSL
 Bash
 curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
