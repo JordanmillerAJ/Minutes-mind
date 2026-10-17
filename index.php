@@ -25,6 +25,7 @@ try {
             host_name TEXT NOT NULL,
             host_email TEXT NOT NULL,
             is_active INTEGER NOT NULL DEFAULT 1,
+            permissions TEXT DEFAULT '{}',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
@@ -43,26 +44,47 @@ try {
     exit;
 }
 
+// Helper to get Windows host gateway if running inside WSL and Windows Ollama is used
+function get_default_ollama_host() {
+    if (!empty(getenv('OLLAMA_HOST_URL'))) {
+        return getenv('OLLAMA_HOST_URL');
+    }
+    try {
+        $route = @file_get_contents('/proc/net/route');
+        if ($route !== false) {
+            $lines = explode("\n", $route);
+            foreach ($lines as $line) {
+                $cols = preg_split('/\s+/', trim($line));
+                if (count($cols) >= 3 && $cols[1] === '00000000') {
+                    $gatewayHex = $cols[2];
+                    $ip = long2ip(hexdec($gatewayHex));
+                    if ($ip) {
+                        return "http://{$ip}:11434";
+                    }
+                }
+            }
+        }
+    } catch (Exception $ex) {}
+    
+    return 'http://127.0.0.1:11434';
+}
+
 // ---------- API ROUTES HANDLER ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
     header('Content-Type: application/json');
     $input = file_get_json_input();
 
-    // 1. Room Creation / Access Validation
+    // 1. Room Creation / Access Validation & Permissions
     if ($_GET['action'] === 'enter_room') {
         $role = $input['role'] ?? 'member';
         $name = trim($input['name'] ?? '');
         $email = strtolower(trim($input['email'] ?? ''));
         $roomCode = strtoupper(preg_replace('/[^A-Za-z0-9_\-]/', '', $input['roomCode'] ?? ''));
+        $permissions = json_encode($input['permissions'] ?? ['allow_chat' => true, 'allow_mic' => true, 'allow_polls' => true]);
 
         if (!$roomCode || !$name) {
             echo json_encode(['error' => 'Room code and user name are required.']);
             exit;
-        }
-
-        if ($email) {
-            $stmt = $db->prepare("INSERT INTO users (email, name, role, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET name=excluded.name");
-            $stmt->execute([$email, $name, $role, time()]);
         }
 
         $stmt = $db->prepare("SELECT * FROM rooms WHERE room_code = ?");
@@ -71,20 +93,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
 
         if ($role === 'host') {
             if (!$room) {
-                $stmt = $db->prepare("INSERT INTO rooms (room_code, host_name, host_email, is_active, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)");
-                $stmt->execute([$roomCode, $name, $email, time(), time()]);
+                $stmt = $db->prepare("INSERT INTO rooms (room_code, host_name, host_email, is_active, permissions, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)");
+                $stmt->execute([$roomCode, $name, $email, $permissions, time(), time()]);
             } else {
-                $stmt = $db->prepare("UPDATE rooms SET is_active = 1, updated_at = ? WHERE room_code = ?");
-                $stmt->execute([time(), $roomCode]);
+                $stmt = $db->prepare("UPDATE rooms SET is_active = 1, permissions = ?, updated_at = ? WHERE room_code = ?");
+                $stmt->execute([$permissions, time(), $roomCode]);
             }
-            echo json_encode(['success' => true, 'roomCode' => $roomCode]);
+            echo json_encode(['success' => true, 'roomCode' => $roomCode, 'permissions' => json_decode($permissions, true)]);
             exit;
         } else {
             if (!$room || (int)$room['is_active'] !== 1) {
                 echo json_encode(['error' => 'Room does not exist or has been terminated by the host.']);
                 exit;
             }
-            echo json_encode(['success' => true, 'roomCode' => $roomCode]);
+            echo json_encode(['success' => true, 'roomCode' => $roomCode, 'permissions' => json_decode($room['permissions'], true)]);
             exit;
         }
     }
@@ -131,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
         $roomCode = strtoupper(preg_replace('/[^A-Za-z0-9_\-]/', '', $input['roomCode'] ?? ''));
         $since = (int)($input['since'] ?? 0);
 
-        $stmt = $db->prepare("SELECT is_active FROM rooms WHERE room_code = ?");
+        $stmt = $db->prepare("SELECT is_active, permissions FROM rooms WHERE room_code = ?");
         $stmt->execute([$roomCode]);
         $room = $stmt->fetch();
 
@@ -145,13 +167,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
         $rows = $stmt->fetchAll();
 
         $messages = array_map(fn($r) => json_decode($r['payload'], true), $rows);
-        echo json_encode(['room_terminated' => false, 'messages' => $messages]);
+        echo json_encode(['room_terminated' => false, 'permissions' => json_decode($room['permissions'], true), 'messages' => $messages]);
         exit;
     }
 
     // 5. Ollama Health Check
     if ($_GET['action'] === 'ping') {
-        $ollamaHost = getenv('OLLAMA_HOST_URL') ?: 'http://127.0.0.1:11434';
+        $ollamaHost = get_default_ollama_host();
         $ch = curl_init($ollamaHost . '/api/tags');
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -192,7 +214,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
             'stream' => false
         ];
 
-        $ollamaHost = getenv('OLLAMA_HOST_URL') ?: 'http://127.0.0.1:11434';
+        $ollamaHost = get_default_ollama_host();
         $ch = curl_init($ollamaHost . '/api/generate');
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -364,6 +386,7 @@ function file_get_json_input() {
                     <div id="userAvatar" class="w-6 h-6 rounded-lg bg-sky-500 flex items-center justify-center font-bold text-xs text-white shadow-sm">U</div>
                     <span id="userNameDisplay" class="text-xs font-semibold text-slate-200">User</span>
                 </div>
+                <button id="raiseHandBtn" class="btn btn-ghost py-1.5 text-xs text-amber-400 border-amber-500/30 hover:bg-amber-500/10"><i class="fa-solid fa-hand"></i> Raise Hand</button>
                 <button id="terminateBtn" title="Terminate Room (Host)" class="btn btn-danger py-1.5 text-xs hidden"><i class="fa-solid fa-power-off"></i> Terminate</button>
                 <button id="logoutBtn" title="Leave Room" class="btn btn-ghost py-1.5 text-xs"><i class="fa-solid fa-right-from-bracket"></i> Leave</button>
             </div>
@@ -372,7 +395,7 @@ function file_get_json_input() {
 
     <!-- ================= AUTH & ROOM ENTRY SCREEN ================= -->
     <div id="authScreen" class="flex-1 flex items-center justify-center px-4 py-16">
-        <div class="w-full max-w-md glass-card p-8 relative overflow-hidden">
+        <div class="w-full max-w-lg glass-card p-8 relative overflow-hidden">
             <div class="absolute -top-24 -left-24 w-48 h-48 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
             
             <div class="text-center mb-8">
@@ -390,13 +413,15 @@ function file_get_json_input() {
 
             <!-- HOST FORM -->
             <form id="hostAuthForm" class="space-y-4">
-                <div>
-                    <label class="block text-xs font-semibold text-slate-300 mb-1.5">Host Name</label>
-                    <input type="text" id="hostName" required class="field" placeholder="e.g. Alex Host">
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-300 mb-1.5">Email Address</label>
-                    <input type="email" id="hostEmail" required class="field" placeholder="alex@company.com">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1.5">Host Name</label>
+                        <input type="text" id="hostName" required class="field" placeholder="Alex Host">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1.5">Email Address</label>
+                        <input type="email" id="hostEmail" required class="field" placeholder="alex@company.com">
+                    </div>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-slate-300 mb-1.5">Room Code</label>
@@ -405,6 +430,21 @@ function file_get_json_input() {
                         <button type="button" id="genRoomBtn" class="btn btn-ghost shrink-0" title="Generate Code"><i class="fa-solid fa-dice text-base"></i></button>
                     </div>
                 </div>
+
+                <!-- PRE-MEETING PERMISSIONS EDITOR -->
+                <div class="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-2.5">
+                    <span class="text-xs font-extrabold text-sky-400 uppercase tracking-wider block mb-2"><i class="fa-solid fa-shield-halved mr-1"></i> Pre-Meeting Permissions</span>
+                    <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input type="checkbox" id="permChat" checked class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-0"> Allow Members to Public/Private Chat
+                    </label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input type="checkbox" id="permPolls" checked class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-0"> Allow Members to Create/Vote on Polls
+                    </label>
+                    <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input type="checkbox" id="permMic" checked class="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-0"> Enable Audio Reactions / Hand Raise
+                    </label>
+                </div>
+
                 <button type="submit" class="w-full btn btn-primary py-3 text-xs tracking-wide uppercase font-extrabold mt-2">Create & Host Room</button>
             </form>
 
@@ -412,7 +452,7 @@ function file_get_json_input() {
             <form id="memberAuthForm" class="space-y-4 hidden">
                 <div>
                     <label class="block text-xs font-semibold text-slate-300 mb-1.5">Your Name</label>
-                    <input type="text" id="memberName" required class="field" placeholder="e.g. Sarah Member">
+                    <input type="text" id="memberName" required class="field" placeholder="Sarah Member">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-slate-300 mb-1.5">Email Address (Optional)</label>
@@ -516,8 +556,19 @@ function file_get_json_input() {
                     <ul id="peerList" class="space-y-1.5 text-xs max-h-36 overflow-y-auto pr-1"></ul>
                 </div>
 
+                <!-- WhatsApp-Style Poll Widget -->
+                <div class="glass-card p-5 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-square-poll-vertical text-sky-400 mr-2"></i> Live Polls</span>
+                        <button id="openPollModalBtn" class="text-[11px] font-bold text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20 hover:bg-sky-500/20 transition-all">+ New Poll</button>
+                    </div>
+                    <div id="pollContainer" class="space-y-3">
+                        <p class="text-xs text-slate-500 italic text-center py-2">No active polls.</p>
+                    </div>
+                </div>
+
                 <!-- Chat System -->
-                <div class="glass-card p-5 flex flex-col h-[500px]">
+                <div class="glass-card p-5 flex flex-col h-[400px]">
                     <div class="flex rounded-xl bg-slate-950/80 p-1 mb-3.5 border border-slate-800 shrink-0">
                         <button id="tabPublicChat" class="flex-1 py-1.5 text-[11px] font-bold rounded-lg bg-sky-600 text-white shadow-sm transition-all">Public Chat</button>
                         <button id="tabPrivateChat" class="flex-1 py-1.5 text-[11px] font-bold rounded-lg text-slate-400 hover:text-white transition-all">Private Direct</button>
@@ -531,22 +582,46 @@ function file_get_json_input() {
 
                     <form id="chatForm" class="flex gap-2 shrink-0">
                         <input type="text" id="chatInput" class="field text-xs" placeholder="Type message..." required>
-                        <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-paper-plane"></i></button>
+                        <button type="submit" id="chatSendBtn" class="btn btn-primary px-4"><i class="fa-solid fa-paper-plane"></i></button>
                     </form>
                 </div>
             </div>
         </div>
     </main>
 
+    <!-- POLL CREATION MODAL -->
+    <div id="pollModal" class="hidden fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="w-full max-w-md glass-card p-6 space-y-4">
+            <h3 class="text-sm font-extrabold text-white uppercase"><i class="fa-solid fa-square-poll-horizontal text-sky-400 mr-2"></i> Create WhatsApp-Style Poll</h3>
+            <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Question</label>
+                <input type="text" id="pollQuestionInput" class="field text-xs" placeholder="e.g. Which cloud provider should we use?">
+            </div>
+            <div id="pollOptionsList" class="space-y-2">
+                <label class="block text-xs font-semibold text-slate-300">Options</label>
+                <input type="text" class="field text-xs poll-option-field" placeholder="Option 1">
+                <input type="text" class="field text-xs poll-option-field" placeholder="Option 2">
+            </div>
+            <button type="button" id="addPollOptionBtn" class="text-[11px] text-sky-400 font-bold hover:underline">+ Add Option</button>
+            <div class="flex gap-2 pt-2">
+                <button type="button" id="submitPollBtn" class="flex-1 btn btn-primary text-xs py-2">Publish Poll</button>
+                <button type="button" id="closePollModalBtn" class="flex-1 btn btn-ghost text-xs py-2">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <script>
     const MY = {
         tabId: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2),
-        role: null, name: null, email: null, roomCode: null
+        role: null, name: null, email: null, roomCode: null, handRaised: false
     };
 
     let lastPolledTimestamp = 0;
     let currentMarkdownResult = "";
     const peers = new Map();
+    const seenMessageIds = new Set();
+    const activePolls = new Map();
+    let roomPermissions = { allow_chat: true, allow_polls: true, allow_mic: true };
     let activeChatTab = 'public';
 
     const rtcConnections = new Map();
@@ -562,6 +637,7 @@ function file_get_json_input() {
             roomCode: MY.roomCode,
             senderName: MY.name,
             senderRole: MY.role,
+            handRaised: MY.handRaised,
             ts: Date.now()
         }, payload);
 
@@ -593,6 +669,11 @@ function file_get_json_input() {
                 return;
             }
 
+            if (data.permissions) {
+                roomPermissions = data.permissions;
+                applyPermissionsUI();
+            }
+
             if (data.messages && data.messages.length > 0) {
                 for (const m of data.messages) {
                     if (m.ts > lastPolledTimestamp) {
@@ -605,6 +686,17 @@ function file_get_json_input() {
             }
         } catch (e) {
             console.error('Poll error:', e);
+        }
+    }
+
+    function applyPermissionsUI() {
+        if (!roomPermissions.allow_chat && MY.role !== 'host') {
+            $('chatInput').disabled = true;
+            $('chatInput').placeholder = 'Chat disabled by host';
+            $('chatSendBtn').disabled = true;
+        }
+        if (!roomPermissions.allow_mic && MY.role !== 'host') {
+            $('raiseHandBtn').classList.add('hidden');
         }
     }
 
@@ -662,6 +754,7 @@ function file_get_json_input() {
             MY.name = user.name;
             MY.email = user.email || '';
             MY.roomCode = data.roomCode;
+            roomPermissions = data.permissions || roomPermissions;
 
             $('userNameDisplay').textContent = MY.name;
             $('userAvatar').textContent = MY.name.charAt(0).toUpperCase();
@@ -678,6 +771,7 @@ function file_get_json_input() {
                 $('hostBoard').classList.add('hidden');$('terminateBtn').classList.add('hidden');
             }
 
+            applyPermissionsUI();
             await sendToNetwork({ type: 'presence' });
             setTimeout(() => sendToNetwork({ type: 'presence' }), 500);
 
@@ -703,11 +797,17 @@ function file_get_json_input() {
 
     $('hostAuthForm').addEventListener('submit', (e) => {
         e.preventDefault();
+        const permissions = {
+            allow_chat: $('permChat').checked,
+            allow_polls: $('permPolls').checked,
+            allow_mic: $('permMic').checked
+        };
         enterRoomRequest({
             role: 'host',
             name: $('hostName').value,
             email: $('hostEmail').value,
-            roomCode: $('hostRoomCode').value
+            roomCode: $('hostRoomCode').value,
+            permissions: permissions
         });
     });
 
@@ -721,8 +821,20 @@ function file_get_json_input() {
         });
     });
 
+    $('raiseHandBtn').addEventListener('click', () => {
+        MY.handRaised = !MY.handRaised;
+        if (MY.handRaised) {
+            $('raiseHandBtn').className = 'btn btn-ghost py-1.5 text-xs text-amber-300 bg-amber-500/20 border-amber-500/50';
+            toast('Hand Raised', 'Host notified.');
+        } else {
+            $('raiseHandBtn').className = 'btn btn-ghost py-1.5 text-xs text-amber-400 border-amber-500/30 hover:bg-amber-500/10';
+        }
+        sendToNetwork({ type: 'presence' });
+        renderPeerList();
+    });
+
     $('terminateBtn').addEventListener('click', async () => {
-        if (!confirm('Are you sure you want to terminate this room? Chat and signaling state will be wiped.')) return;
+        if (!confirm('Are you sure you want to terminate this room?')) return;
         await fetch('index.php?action=terminate_room', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -756,15 +868,15 @@ function file_get_json_input() {
 
         const selfItem = document.createElement('li');
         selfItem.className = 'text-sky-400 font-bold flex items-center justify-between py-1 px-2 rounded-lg bg-sky-500/10 border border-sky-500/20';
-        selfItem.textContent = `${MY.name} (${MY.role.toUpperCase()}) - You`;
+        selfItem.innerHTML = `<span>${MY.name} (${MY.role.toUpperCase()}) - You</span> ${MY.handRaised ? '<i class="fa-solid fa-hand text-amber-400 ml-2 animate-bounce" title="Hand Raised"></i>' : ''}`;
         list.appendChild(selfItem);
 
         let count = 1;
         peers.forEach((p, id) => {
             count++;
             const item = document.createElement('li');
-            item.className = 'text-slate-300 font-medium py-1 px-2 rounded-lg bg-slate-900/60 border border-slate-800';
-            item.textContent = `${p.name} (${p.role.toUpperCase()})`;
+            item.className = 'text-slate-300 font-medium py-1 px-2 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center justify-between';
+            item.innerHTML = `<span>${p.name} (${p.role.toUpperCase()})</span> ${p.handRaised ? '<i class="fa-solid fa-hand text-amber-400 ml-2 animate-bounce" title="Hand Raised"></i>' : ''}`;
             list.appendChild(item);
 
             const opt = document.createElement('option');
@@ -774,6 +886,98 @@ function file_get_json_input() {
         });
 
         $('peerCountBadge').textContent = count;
+    }
+
+    // POLL LOGIC
+    $('openPollModalBtn').addEventListener('click', () => {
+        if (!roomPermissions.allow_polls && MY.role !== 'host') {
+            toast('Restricted', 'Poll creation is disabled by host.');
+            return;
+        }
+        $('pollModal').classList.remove('hidden');
+    });
+    $('closePollModalBtn').addEventListener('click', () => $('pollModal').classList.add('hidden'));$('addPollOptionBtn').addEventListener('click', () => {
+        const list = $('pollOptionsList');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'field text-xs poll-option-field mt-1';
+        input.placeholder = `Option ${list.querySelectorAll('input').length + 1}`;
+        list.appendChild(input);
+    });
+
+    $('submitPollBtn').addEventListener('click', async () => {
+        const question = $('pollQuestionInput').value.trim();
+        const optionFields = document.querySelectorAll('.poll-option-field');
+        const options = Array.from(optionFields).map(i => i.value.trim()).filter(Boolean);
+
+        if (!question || options.length < 2) {
+            toast('Error', 'Provide a question and at least 2 options.');
+            return;
+        }
+
+        const pollId = 'poll-' + Math.random().toString(36).substr(2, 9);
+        const pollData = {
+            id: pollId,
+            question: question,
+            options: options.map(opt => ({ text: opt, votes: [] }))
+        };
+
+        activePolls.set(pollId, pollData);
+        await sendToNetwork({ type: 'new-poll', poll: pollData });
+        renderPolls();
+        $('pollModal').classList.add('hidden');$('pollQuestionInput').value = '';
+        toast('Poll Published', 'Sent to all participants.');
+    });
+
+    function renderPolls() {
+        const container = $('pollContainer');
+        if (activePolls.size === 0) {
+            container.innerHTML = `<p class="text-xs text-slate-500 italic text-center py-2">No active polls.</p>`;
+            return;
+        }
+
+        container.innerHTML = '';
+        activePolls.forEach((poll) => {
+            const card = document.createElement('div');
+            card.className = 'bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-2.5';
+            
+            const qHeader = document.createElement('p');
+            qHeader.className = 'font-bold text-xs text-white';
+            qHeader.textContent = poll.question;
+            card.appendChild(qHeader);
+
+            const totalVotes = poll.options.reduce((sum, opt) => sum + opt.votes.length, 0);
+
+            poll.options.forEach((opt, idx) => {
+                const optBtn = document.createElement('button');
+                const hasVoted = opt.votes.includes(MY.tabId);
+                const percentage = totalVotes > 0 ? Math.round((opt.votes.length / totalVotes) * 100) : 0;
+
+                optBtn.className = `w-full text-left p-2 rounded-lg text-xs font-semibold border transition-all flex justify-between items-center ${hasVoted ? 'bg-sky-600/20 border-sky-500 text-sky-300' : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'}`;
+                optBtn.innerHTML = `<span>${opt.text}</span> <span class="text-[10px] opacity-70">${opt.votes.length} votes (${percentage}%)</span>`;
+                
+                optBtn.onclick = async () => {
+                    await sendToNetwork({ type: 'vote-poll', pollId: poll.id, optionIndex: idx });
+                    castVoteLocally(poll.id, idx);
+                };
+                card.appendChild(optBtn);
+            });
+            container.appendChild(card);
+        });
+    }
+
+    function castVoteLocally(pollId, optionIndex) {
+        const poll = activePolls.get(pollId);
+        if (!poll) return;
+
+        // Remove previous vote by user if any
+        poll.options.forEach(opt => {
+            const idx = opt.votes.indexOf(MY.tabId);
+            if (idx > -1) opt.votes.splice(idx, 1);
+        });
+
+        poll.options[optionIndex].votes.push(MY.tabId);
+        renderPolls();
     }
 
     $('tabPublicChat').addEventListener('click', () => {
@@ -790,16 +994,24 @@ function file_get_json_input() {
 
     $('chatForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (!roomPermissions.allow_chat && MY.role !== 'host') {
+            toast('Restricted', 'Chat is disabled by the host.');
+            return;
+        }
+
         const text = $('chatInput').value.trim();
         if (!text) return;
 
+        const msgId = 'msg-' + Math.random().toString(36).substr(2, 9);
+        seenMessageIds.add(msgId);
+
         if (activeChatTab === 'public') {
-            await sendToNetwork({ type: 'public-chat', text: text });
+            await sendToNetwork({ type: 'public-chat', id: msgId, text: text });
             appendChatMessage({ senderName: MY.name, text: text, isMine: true, isPrivate: false });
         } else {
             const targetId = $('privateTargetSelect').value;
             if (!targetId) { toast('Error', 'Select a room member.'); return; }
-            await sendToNetwork({ type: 'private-chat', targetTabId: targetId, text: text });
+            await sendToNetwork({ type: 'private-chat', id: msgId, targetTabId: targetId, text: text });
             appendChatMessage({ senderName: `To ${peers.get(targetId)?.name || 'User'}`, text: text, isMine: true, isPrivate: true });
         }
         $('chatInput').value = '';
@@ -946,7 +1158,7 @@ function file_get_json_input() {
     async function handleIncomingSignal(m) {
         switch (m.type) {
             case 'presence':
-                peers.set(m.from, { name: m.senderName, role: m.senderRole, lastSeen: Date.now() });
+                peers.set(m.from, { name: m.senderName, role: m.senderRole, handRaised: m.handRaised, lastSeen: Date.now() });
                 renderPeerList();
 
                 if (!peers.has(m.from)) {
@@ -965,14 +1177,28 @@ function file_get_json_input() {
                 break;
 
             case 'public-chat':
+                if (m.id && seenMessageIds.has(m.id)) break;
+                if (m.id) seenMessageIds.add(m.id);
                 appendChatMessage({ senderName: m.senderName, text: m.text, isMine: false, isPrivate: false });
                 break;
 
             case 'private-chat':
                 if (m.targetTabId === MY.tabId) {
+                    if (m.id && seenMessageIds.has(m.id)) break;
+                    if (m.id) seenMessageIds.add(m.id);
                     appendChatMessage({ senderName: m.senderName, text: m.text, isMine: false, isPrivate: true });
                     toast('Private Message', `New message from ${m.senderName}`);
                 }
+                break;
+
+            case 'new-poll':
+                activePolls.set(m.poll.id, m.poll);
+                renderPolls();
+                toast('New Poll', m.poll.question);
+                break;
+
+            case 'vote-poll':
+                castVoteLocally(m.pollId, m.optionIndex);
                 break;
 
             case 'published-minutes':
