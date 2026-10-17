@@ -44,7 +44,7 @@ try {
     exit;
 }
 
-// Helper to get Windows host gateway if running inside WSL and Windows Ollama is used
+// Helper to get Windows host gateway if running inside WSL
 function get_default_ollama_host() {
     if (!empty(getenv('OLLAMA_HOST_URL'))) {
         return getenv('OLLAMA_HOST_URL');
@@ -74,7 +74,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
     header('Content-Type: application/json');
     $input = file_get_json_input();
 
-    // 1. Room Creation / Access Validation & Permissions
     if ($_GET['action'] === 'enter_room') {
         $role = $input['role'] ?? 'member';
         $name = trim($input['name'] ?? '');
@@ -111,7 +110,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
         }
     }
 
-    // 2. Host Terminate Room
     if ($_GET['action'] === 'terminate_room') {
         $roomCode = strtoupper(preg_replace('/[^A-Za-z0-9_\-]/', '', $input['roomCode'] ?? ''));
         if ($roomCode) {
@@ -124,7 +122,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
         exit;
     }
 
-    // 3. Post Signal/Message
     if ($_GET['action'] === 'send_signal') {
         $roomCode = strtoupper(preg_replace('/[^A-Za-z0-9_\-]/', '', $input['roomCode'] ?? ''));
         if (!$roomCode) {
@@ -148,7 +145,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
         exit;
     }
 
-    // 4. Poll Signals
     if ($_GET['action'] === 'poll_signals') {
         $roomCode = strtoupper(preg_replace('/[^A-Za-z0-9_\-]/', '', $input['roomCode'] ?? ''));
         $since = (int)($input['since'] ?? 0);
@@ -171,7 +167,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
         exit;
     }
 
-    // 5. Ollama Health Check
     if ($_GET['action'] === 'ping') {
         $ollamaHost = get_default_ollama_host();
         $ch = curl_init($ollamaHost . '/api/tags');
@@ -188,7 +183,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
         exit;
     }
 
-    // 6. AI Minutes Generation
     if ($_GET['action'] === 'generate') {
         header('Cache-Control: no-store');
         $transcript = $input['transcript'] ?? '';
@@ -353,6 +347,34 @@ function file_get_json_input() {
         .chat-mine { background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; align-self: flex-end; border-bottom-right-radius: 2px; }
         .chat-other { background: rgba(51, 65, 85, 0.7); color: #f1f5f9; align-self: flex-start; border-bottom-left-radius: 2px; border: 1px solid var(--border-color); }
 
+        /* Multi-Video Grid Styling */
+        .video-tile {
+            position: relative;
+            background: #020617;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            aspect-ratio: 16 / 9;
+        }
+        .video-tile video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .video-tile .user-tag {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(4px);
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #f8fafc;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
         /* Custom Scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -474,32 +496,28 @@ function file_get_json_input() {
             <!-- LEFT/MAIN COLUMN -->
             <div class="lg:col-span-8 space-y-6">
 
-                <!-- HOST BOARD -->
-                <div id="hostBoard" class="hidden space-y-6">
-                    <div class="glass-card p-5">
-                        <div class="flex justify-between items-center mb-3.5">
-                            <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-video text-sky-400 mr-2"></i> Host WebRTC Broadcast</span>
-                            <span class="text-[11px] font-semibold text-slate-500">P2P Stream</span>
-                        </div>
-                        <div class="relative bg-slate-950 aspect-video rounded-xl flex items-center justify-center overflow-hidden border border-slate-800 shadow-inner">
-                            <video id="hostVideoPlayer" class="w-full h-full object-cover hidden" autoplay playsinline muted></video>
-                            <div id="videoPlaceholder" class="text-center text-slate-500 p-6">
-                                <div class="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto mb-3">
-                                    <i class="fa-solid fa-video-slash text-xl text-slate-600"></i>
-                                </div>
-                                <p class="text-xs font-semibold">No active video stream</p>
-                            </div>
-                        </div>
-                        <div class="flex gap-2.5 mt-4">
-                            <button id="startCamBtn" class="btn btn-ghost text-xs"><i class="fa-solid fa-webcam text-sky-400"></i> Camera</button>
-                            <label class="btn btn-ghost text-xs cursor-pointer">
-                                <i class="fa-solid fa-folder-open text-sky-400"></i> Video File
-                                <input type="file" id="videoFileInput" accept="video/*" class="hidden">
-                            </label>
-                            <button id="stopVideoBtn" class="btn btn-danger text-xs hidden"><i class="fa-solid fa-power-off"></i> Stop Stream</button>
+                <!-- MULTI-USER VIDEO GRID -->
+                <div class="glass-card p-5">
+                    <div class="flex justify-between items-center mb-3.5">
+                        <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-users-rectangle text-sky-400 mr-2"></i> Live Video Grid (All Participants)</span>
+                        <div class="flex gap-2">
+                            <button id="toggleCamBtn" class="btn btn-ghost text-xs"><i class="fa-solid fa-video text-sky-400"></i> Turn On Camera</button>
                         </div>
                     </div>
+                    <div id="videoGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-3 min-h-[200px]">
+                        <div id="localVideoTile" class="video-tile flex items-center justify-center bg-slate-950">
+                            <video id="localVideoPlayer" autoplay playsinline muted class="hidden"></video>
+                            <div id="localVideoPlaceholder" class="text-center text-slate-500">
+                                <i class="fa-solid fa-video-slash text-2xl mb-1"></i>
+                                <p class="text-[11px] font-semibold">Your Camera Off</p>
+                            </div>
+                            <span class="user-tag" id="localUserTag">You</span>
+                        </div>
+                    </div>
+                </div>
 
+                <!-- HOST BOARD -->
+                <div id="hostBoard" class="hidden space-y-6">
                     <div class="glass-card p-5 space-y-3.5">
                         <div class="flex justify-between items-center">
                             <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-wand-magic-sparkles text-sky-400 mr-2"></i> Meeting Transcript Input</span>
@@ -522,20 +540,6 @@ function file_get_json_input() {
 
                 <!-- MEMBER BOARD -->
                 <div id="memberBoard" class="hidden space-y-6">
-                    <div class="glass-card p-5">
-                        <div class="flex justify-between items-center mb-3.5">
-                            <span class="text-xs font-extrabold tracking-wider text-slate-300 uppercase"><i class="fa-solid fa-display text-sky-400 mr-2"></i> Host Broadcast Stream</span>
-                            <span id="hostConnPill" class="pill pill-off"><span class="dot"></span><span id="hostConnText">Offline</span></span>
-                        </div>
-                        <div class="relative bg-slate-950 aspect-video rounded-xl flex items-center justify-center overflow-hidden border border-slate-800 shadow-inner">
-                            <video id="memberVideoPlayer" class="w-full h-full object-cover hidden" autoplay playsinline controls muted></video>
-                            <div id="memberVideoPlaceholder" class="text-center p-6 text-slate-500">
-                                <i class="fa-solid fa-tower-broadcast text-3xl mb-2 text-slate-600"></i>
-                                <p class="text-xs font-semibold">Awaiting host video broadcast...</p>
-                            </div>
-                        </div>
-                    </div>
-
                     <div class="glass-card p-5">
                         <h3 class="text-xs font-extrabold tracking-wider text-slate-300 uppercase mb-3.5"><i class="fa-solid fa-newspaper text-sky-400 mr-2"></i> Published Meeting Minutes</h3>
                         <div id="memberFormattedOutput" class="bg-slate-950/60 p-5 rounded-xl text-xs text-slate-300 border border-slate-800/80 min-h-[160px] prose prose-invert max-w-none leading-relaxed">
@@ -613,7 +617,7 @@ function file_get_json_input() {
     <script>
     const MY = {
         tabId: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2),
-        role: null, name: null, email: null, roomCode: null, handRaised: false
+        role: null, name: null, email: null, roomCode: null, handRaised: false, cameraOn: false
     };
 
     let lastPolledTimestamp = 0;
@@ -759,6 +763,7 @@ function file_get_json_input() {
             $('userNameDisplay').textContent = MY.name;
             $('userAvatar').textContent = MY.name.charAt(0).toUpperCase();
             $('roleBadge').textContent = MY.role.toUpperCase();$('roomBadge').textContent = 'ROOM: ' + MY.roomCode;
+            $('localUserTag').textContent = `${MY.name} (You)`;
 
             $('authScreen').classList.add('hidden');
             $('appHeader').classList.remove('hidden');$('appWorkspace').classList.remove('hidden');
@@ -821,6 +826,102 @@ function file_get_json_input() {
         });
     });
 
+    // CAMERA TOGGLE & WEBRTC GRID
+    $('toggleCamBtn').addEventListener('click', async () => {
+        if (!MY.cameraOn) {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                $('localVideoPlayer').srcObject = localStream;
+                $('localVideoPlayer').classList.remove('hidden');$('localVideoPlaceholder').classList.add('hidden');
+                MY.cameraOn = true;
+                $('toggleCamBtn').innerHTML = '<i class="fa-solid fa-video-slash text-red-400"></i> Turn Off Camera';
+
+                // Connect to all existing peers to send video stream
+                peers.forEach((p, peerId) => initiatePeerConnection(peerId));
+            } catch (err) {
+                toast('Camera Error', err.message || 'Could not access webcam');
+            }
+        } else {
+            if (localStream) {
+                localStream.getTracks().forEach(t => t.stop());
+                localStream = null;
+            }
+            $('localVideoPlayer').srcObject = null;
+            $('localVideoPlayer').classList.add('hidden');$('localVideoPlaceholder').classList.remove('hidden');
+            MY.cameraOn = false;
+            $('toggleCamBtn').innerHTML = '<i class="fa-solid fa-video text-sky-400"></i> Turn On Camera';
+        }
+    });
+
+    function createPeerConnection(targetTabId, targetName) {
+        if (rtcConnections.has(targetTabId)) {
+            rtcConnections.get(targetTabId).close();
+        }
+
+        const pc = new RTCPeerConnection(rtcConfig);
+        rtcConnections.set(targetTabId, pc);
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                sendToNetwork({
+                    type: 'rtc-candidate',
+                    targetTabId: targetTabId,
+                    candidate: event.candidate
+                });
+            }
+        };
+
+        if (localStream) {
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        }
+
+        pc.ontrack = (event) => {
+            let tile = document.getElementById(`tile-${targetTabId}`);
+            if (!tile) {
+                tile = document.createElement('div');
+                tile.id = `tile-${targetTabId}`;
+                tile.className = 'video-tile flex items-center justify-center';
+                
+                const vid = document.createElement('video');
+                vid.autoplay = true;
+                vid.playsinline = true;
+                vid.srcObject = event.streams[0];
+                
+                const tag = document.createElement('span');
+                tag.className = 'user-tag';
+                tag.textContent = targetName || 'Member';
+
+                tile.appendChild(vid);
+                tile.appendChild(tag);
+                $('videoGrid').appendChild(tile);
+            }
+        };
+
+        return pc;
+    }
+
+    async function initiatePeerConnection(targetTabId) {
+        const p = peers.get(targetTabId);
+        const pc = createPeerConnection(targetTabId, p ? p.name : 'Member');
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        sendToNetwork({
+            type: 'rtc-offer',
+            targetTabId: targetTabId,
+            offer: offer
+        });
+    }
+
+    function closePeerConnection(tabId) {
+        if (rtcConnections.has(tabId)) {
+            rtcConnections.get(tabId).close();
+            rtcConnections.delete(tabId);
+        }
+        const tile = document.getElementById(`tile-${tabId}`);
+        if (tile) tile.remove();
+    }
+
     $('raiseHandBtn').addEventListener('click', () => {
         MY.handRaised = !MY.handRaised;
         if (MY.handRaised) {
@@ -844,7 +945,6 @@ function file_get_json_input() {
     });
 
     $('logoutBtn').addEventListener('click', () => {
-        stopBroadcast();
         sendToNetwork({ type: 'bye' });
         location.reload();
     });
@@ -970,7 +1070,6 @@ function file_get_json_input() {
         const poll = activePolls.get(pollId);
         if (!poll) return;
 
-        // Remove previous vote by user if any
         poll.options.forEach(opt => {
             const idx = opt.votes.indexOf(MY.tabId);
             if (idx > -1) opt.votes.splice(idx, 1);
@@ -1035,126 +1134,6 @@ function file_get_json_input() {
         box.scrollTop = box.scrollHeight;
     }
 
-    async function startCamera() {
-        try {
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            attachHostStream(localStream);
-        } catch (err) {
-            toast('Camera Error', err.message || 'Could not access camera/microphone');
-        }
-    }
-
-    function handleVideoFileSelect(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const videoEl = document.createElement('video');
-        videoEl.src = URL.createObjectURL(file);
-        videoEl.loop = true;
-        videoEl.muted = true;
-        videoEl.play();
-
-        videoEl.onplay = () => {
-            localStream = videoEl.captureStream ? videoEl.captureStream() : videoEl.mozCaptureStream();
-            attachHostStream(localStream);
-        };
-    }
-
-    function attachHostStream(stream) {
-        const hostVideo = $('hostVideoPlayer');
-        hostVideo.srcObject = stream;
-        hostVideo.classList.remove('hidden');
-        $('videoPlaceholder').classList.add('hidden');$('stopVideoBtn').classList.remove('hidden');
-
-        peers.forEach((p, memberId) => {
-            if (p.role === 'member') initiatePeerConnection(memberId);
-        });
-
-        sendToNetwork({ type: 'stream-started' });
-        toast('Broadcasting', 'Live video active.');
-    }
-
-    function stopBroadcast() {
-        if (localStream) {
-            localStream.getTracks().forEach(track => track.stop());
-            localStream = null;
-        }
-
-        rtcConnections.forEach((pc) => pc.close());
-        rtcConnections.clear();
-
-        const hostVideo = $('hostVideoPlayer');
-        hostVideo.srcObject = null;
-        hostVideo.classList.add('hidden');
-        $('videoPlaceholder').classList.remove('hidden');$('stopVideoBtn').classList.add('hidden');
-
-        sendToNetwork({ type: 'stream-stopped' });
-    }
-
-    function createPeerConnection(targetTabId) {
-        if (rtcConnections.has(targetTabId)) {
-            rtcConnections.get(targetTabId).close();
-        }
-
-        const pc = new RTCPeerConnection(rtcConfig);
-        rtcConnections.set(targetTabId, pc);
-
-        pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                sendToNetwork({
-                    type: 'rtc-candidate',
-                    targetTabId: targetTabId,
-                    candidate: event.candidate
-                });
-            }
-        };
-
-        if (MY.role === 'host' && localStream) {
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-        }
-
-        if (MY.role === 'member') {
-            pc.ontrack = (event) => {
-                const memberVideo = $('memberVideoPlayer');
-                memberVideo.srcObject = event.streams[0];
-                memberVideo.classList.remove('hidden');
-                $('memberVideoPlaceholder').classList.add('hidden');
-
-                $('hostConnPill').className = 'pill pill-live';$('hostConnText').textContent = 'Live Feed';
-            };
-
-            pc.oniceconnectionstatechange = () => {
-                if (['disconnected', 'failed', 'closed'].includes(pc.iceConnectionState)) {
-                    $('hostConnPill').className = 'pill pill-off';$('hostConnText').textContent = 'Offline';
-                }
-            };
-        }
-
-        return pc;
-    }
-
-    async function initiatePeerConnection(memberTabId) {
-        const pc = createPeerConnection(memberTabId);
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        sendToNetwork({
-            type: 'rtc-offer',
-            targetTabId: memberTabId,
-            offer: offer
-        });
-    }
-
-    function closePeerConnection(tabId) {
-        if (rtcConnections.has(tabId)) {
-            rtcConnections.get(tabId).close();
-            rtcConnections.delete(tabId);
-        }
-    }
-
-    $('startCamBtn').addEventListener('click', startCamera);
-    $('videoFileInput').addEventListener('change', handleVideoFileSelect);$('stopVideoBtn').addEventListener('click', stopBroadcast);
-
     async function handleIncomingSignal(m) {
         switch (m.type) {
             case 'presence':
@@ -1163,10 +1142,6 @@ function file_get_json_input() {
 
                 if (!peers.has(m.from)) {
                     sendToNetwork({ type: 'presence' });
-                }
-
-                if (MY.role === 'host' && localStream && m.senderRole === 'member' && !rtcConnections.has(m.from)) {
-                    initiatePeerConnection(m.from);
                 }
                 break;
 
@@ -1208,23 +1183,9 @@ function file_get_json_input() {
                 }
                 break;
 
-            case 'stream-started':
-                if (MY.role === 'member') toast('Host Streaming', `${m.senderName} started video stream.`);
-                break;
-
-            case 'stream-stopped':
-                if (MY.role === 'member') {
-                    const memberVideo = $('memberVideoPlayer');
-                    memberVideo.srcObject = null;
-                    memberVideo.classList.add('hidden');
-                    $('memberVideoPlaceholder').classList.remove('hidden');
-                    $('hostConnPill').className = 'pill pill-off';$('hostConnText').textContent = 'Offline';
-                }
-                break;
-
             case 'rtc-offer':
                 if (m.targetTabId === MY.tabId) {
-                    const pc = createPeerConnection(m.from);
+                    const pc = createPeerConnection(m.from, m.senderName);
                     await pc.setRemoteDescription(new RTCSessionDescription(m.offer));
                     const answer = await pc.createAnswer();
                     await pc.setLocalDescription(answer);
@@ -1284,7 +1245,6 @@ function file_get_json_input() {
     });
 
     window.addEventListener('beforeunload', () => {
-        stopBroadcast();
         sendToNetwork({ type: 'bye' });
     });
     </script>
